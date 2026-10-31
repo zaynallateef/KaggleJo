@@ -1,0 +1,11 @@
+node_modules
+.venv
+.git
+.npm-cache
+dist
+data
+.env
+artifacts
+**/__pycache__
+**/*.pyc
+**/*.db*

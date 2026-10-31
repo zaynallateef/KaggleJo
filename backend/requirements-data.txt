@@ -1,0 +1,3 @@
+# Optional operator-only dependencies. The web server never needs Kaggle credentials.
+kaggle==2.2.5
+kagglesdk==0.1.38
