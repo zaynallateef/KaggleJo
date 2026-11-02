@@ -8,10 +8,10 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const request = (body: unknown = payload, key = 'sb_publishable_test', origin = 'https://zaynallateef.github.io') => new Request('https://example.supabase.co/functions/v1/submit-profile', {
   method: 'POST', headers: { apikey: key, origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
-function fixture(options: { documents?: unknown[]; kaggleFailure?: boolean; databaseFailure?: boolean; state?: string } = {}) {
+function fixture(options: { documents?: unknown[]; emptyPayload?: boolean; kaggleFailure?: boolean; databaseFailure?: boolean; state?: string } = {}) {
   const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.includes('api.kaggle.com')) return options.kaggleFailure ? json({ message: 'PRIVATE_ERROR_TOKEN' }, 503) : json({ documents: options.documents ?? [account] })
+    if (url.includes('api.kaggle.com')) return options.kaggleFailure ? json({ message: 'PRIVATE_ERROR_TOKEN' }, 503) : json(options.emptyPayload ? {} : { documents: options.documents ?? [account] })
     if (url.endsWith('kagglejo_nominate')) return options.databaseFailure ? json({}, 503) : json({ message: 'saved' })
     if (url.endsWith('kagglejo_automation_token')) return json('TEST_TOKEN_FOR_KAGGLE_LOOKUP')
     if (url.endsWith('kagglejo_accept_submission')) {
@@ -52,6 +52,12 @@ describe('automatic public profile submissions', () => {
     const { handle, transport } = fixture({ state: 'approved' })
     expect((await handle(request())).status).toBe(200)
     expect(transport).toHaveBeenCalledTimes(2)
+  })
+  it('handles Kaggle omitting all default fields for an empty search result', async () => {
+    const { handle } = fixture({ emptyPayload: true })
+    const response = await handle(request())
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({ status: 'checking', message: expect.stringContaining('exact public Kaggle account is not available') })
   })
   it('does not restore revoked or rejected members', async () => {
     const { handle, transport } = fixture({ state: 'blocked' })

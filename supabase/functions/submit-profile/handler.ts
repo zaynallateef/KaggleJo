@@ -4,6 +4,7 @@ type Environment = { url: string; secretKey: string; publishableKeys: string[] }
 type RecordValue = Record<string, unknown>
 const record = (value: unknown): value is RecordValue => typeof value === 'object' && value !== null && !Array.isArray(value)
 class PublicError extends Error { constructor(message: string, readonly status = 400) { super(message) } }
+class ServiceError extends Error { constructor(readonly stage: string, readonly status = 0) { super(stage) } }
 
 export function createHandler(env: Environment, transport: typeof fetch = fetch) {
   return async (request: Request): Promise<Response> => {
@@ -30,13 +31,13 @@ export function createHandler(env: Environment, transport: typeof fetch = fetch)
         if (record(data) && data.code === '22023' && typeof data.message === 'string') throw new PublicError(data.message)
         if (record(data) && data.code === 'P0001' && typeof data.message === 'string' && data.message.includes('submission limit'))
           throw new PublicError('The community submission limit was reached. Please try again tomorrow.', 429)
-        throw new Error('Database operation failed')
+        throw new ServiceError(`rpc:${name}`, response.status)
       }
       return data
     }
     let saved = false
     try {
-      if (!env.url || !env.secretKey) throw new Error('Server configuration missing')
+      if (!env.url || !env.secretKey) throw new ServiceError('server_configuration')
       const raw = await request.text()
       if (new TextEncoder().encode(raw).length > 2048) throw new PublicError('Send only the profile fields.', 413)
       let payload: unknown
@@ -53,7 +54,7 @@ export function createHandler(env: Environment, transport: typeof fetch = fetch)
       if (record(existing) && existing.status === 'approved') return reply(existing)
       if (record(existing) && existing.status === 'blocked') throw new PublicError('This profile cannot be added automatically. Contact the site operator.', 409)
       const token = await rpc('kagglejo_automation_token')
-      if (typeof token !== 'string' || !token) throw new Error('Automatic lookup is not configured')
+      if (typeof token !== 'string' || !token) throw new ServiceError('kaggle_configuration')
       let pageToken = ''
       const seen = new Set<string>()
       let account: RecordValue | undefined
@@ -63,10 +64,10 @@ export function createHandler(env: Environment, transport: typeof fetch = fetch)
           body: JSON.stringify({ filters: { query: username, privacy: 'PUBLIC', documentTypes: ['USER'] },
             usersOrderBy: 'SEARCH_USERS_ORDER_BY_DISPLAY_NAME', pageSize: 100, pageToken }), signal: AbortSignal.timeout(15000),
         })
-        if (!response.ok) throw new Error('Kaggle is unavailable')
+        if (!response.ok) throw new ServiceError('kaggle_http', response.status)
         const data: unknown = await response.json()
-        if (!record(data) || !Array.isArray(data.documents)) throw new Error('Invalid Kaggle response')
-        account = data.documents.find((doc: unknown): doc is RecordValue => record(doc) && doc.documentType === 'USER'
+        if (!record(data) || (data.documents !== undefined && !Array.isArray(data.documents))) throw new ServiceError('kaggle_payload')
+        account = (data.documents || []).find((doc: unknown): doc is RecordValue => record(doc) && doc.documentType === 'USER'
           && doc.isPrivate !== true && record(doc.ownerUser) && typeof doc.ownerUser.userName === 'string'
           && doc.ownerUser.userName.toLowerCase() === username)
         if (account) break
@@ -82,6 +83,7 @@ export function createHandler(env: Environment, transport: typeof fetch = fetch)
       return reply(accepted)
     } catch (error) {
       if (error instanceof PublicError) return reply({ message: error.message }, error.status)
+      console.warn('automatic_profile_check_failed', error instanceof ServiceError ? { stage: error.stage, status: error.status } : { stage: 'transport' })
       // Never return upstream bodies, headers, tokens, or exception strings.
       if (!saved) return reply({ message: 'Your submission could not be saved. Please try again shortly.' }, 503)
       return reply({ status: 'checking', message: 'Your submission will be checked automatically during the next update. No manual review is needed.' }, 202)
