@@ -2,6 +2,8 @@
 
 KaggleJo can run as a free public directory: React is hosted on GitHub Pages, while a Python GitHub Actions job fetches Kaggle profiles and publishes a new data snapshot hourly. No continuously running Python server or paid database is required for this version.
 
+For a Supabase-backed directory with visitor submissions and reviewed community members, follow [the Supabase guide](SUPABASE.md) as well. The sections below describe the default static-only mode; configuring Supabase switches website reads and submissions to its restricted RPCs while retaining the Kaggle refresh job.
+
 GitHub Pages on GitHub Free requires a **public repository**. Source code and the public profile snapshot will be public. Credentials, local databases, nominations, and backups are excluded. See [GitHub Pages availability](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages).
 
 ## 1. Create the source repository

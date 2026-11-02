@@ -60,6 +60,7 @@ def initialize(path=None, demo=False):
             "overall_tier": "TEXT NOT NULL DEFAULT 'Unspecified'",
             "organization": "TEXT NOT NULL DEFAULT ''", "location": "TEXT NOT NULL DEFAULT ''",
             "progression_opt_out": "INTEGER NOT NULL DEFAULT 0", "checked_at": "TEXT",
+            "membership_source": "TEXT NOT NULL DEFAULT 'kaggle_location'",
         }.items():
             if column not in member_columns:
                 db.execute(f"ALTER TABLE members ADD COLUMN {column} {declaration}")

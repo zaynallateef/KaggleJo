@@ -47,7 +47,7 @@ export function Community({ refresh, onProfile, onAdd }: { refresh: number; onPr
   return <section className="directory-page">
     <div className="directory-hero"><div><div className="hero-eyebrow"><span className="jordan-flag" aria-hidden="true" /> THE PEOPLE BEHIND THE POSSIBILITIES</div><h1>Jordan’s Kaggle <br /><span>community.</span></h1><p>First notebook or global leaderboard.<br />There’s a place for everyone here.</p></div><div className="directory-hero-note"><Users size={32} weight="duotone" /><strong>Curiosity is the<br />only prerequisite.</strong><span>Discover the people learning,<br />building, and sharing in Jordan.</span></div></div>
     <div className="stats-grid directory-stats" aria-label="Jordan community statistics">
-      <DirectoryStat label="Kagglers in Jordan" value={community?.total_members} note="Public profiles in this index" icon={<Users size={18} />} />
+      <DirectoryStat label="Community members" value={community?.total_members} note="Public profiles in this index" icon={<Users size={18} />} />
       <DirectoryStat label="Ranked members" value={community?.ranked_members} note="In at least one available category" icon={<Trophy size={18} />} />
       <DirectoryStat label="Without a ranking" value={community?.unranked_members} note="Every journey belongs here" icon={<GlobeHemisphereWest size={18} />} />
       <DirectoryStat label="Cities represented" value={community ? cityCount : undefined} note="Based on shared profile locations" icon={<MapPin size={18} />} />
@@ -66,7 +66,7 @@ export function Community({ refresh, onProfile, onAdd }: { refresh: number; onPr
     {error ? <ErrorState message={error} retry={() => setRetry(retry + 1)} /> : loading ? <div className="directory-loading"><Skeleton rows={4} /><Skeleton rows={4} /><Skeleton rows={4} /></div> : data?.items.length ? <div className="people-grid">{data.items.map(person => <PersonCard key={person.id} person={person} onProfile={onProfile} />)}</div> : <div className="empty-state"><Users size={32} /><h3>{filtered ? 'No members match those filters.' : 'Be part of the first chapter.'}</h3><p>{filtered ? 'Try another name, city, or tier.' : 'Submit a public Kaggle profile to help grow the community.'}</p><button className="text-button" onClick={() => filtered ? update({ ...defaults }) : onAdd()}>{filtered ? 'Clear community filters' : 'Add a profile'} <ArrowRight size={15} /></button></div>}
     <div className="pagination directory-pagination"><span>{data?.total ? `${(filters.page - 1) * data.page_size + 1}–${Math.min(filters.page * data.page_size, data.total)} of ${format(data.total)} members` : '0 members'}</span><div><button className="icon-button" aria-label="Previous community page" disabled={loading || filters.page <= 1} onClick={() => update({ page: filters.page - 1 })}><CaretLeft size={16} /></button><span>{filters.page} <span className="muted">/ {data?.pages || 1}</span></span><button className="icon-button" aria-label="Next community page" disabled={loading || filters.page >= (data?.pages || 1)} onClick={() => update({ page: filters.page + 1 })}><CaretRight size={16} /></button></div></div>
     {filters.q && !loading && !error && <p className="directory-coverage">Missing someone? Search accepts names, @usernames, and Kaggle profile links. <a className="subtle-link" href={`https://www.kaggle.com/search?q=${encodeURIComponent(filters.q)}`} target="_blank" rel="noreferrer">Check Kaggle <ArrowUpRight size={13} /></a> or <button className="text-button" onClick={onAdd}>{PROFILE_ACTION.toLowerCase()}</button>. This search covers our latest snapshot; a missing result does not mean the account is absent from Kaggle.</p>}
-    <p className="directory-coverage">Based on public profile locations shared on Kaggle. Includes all imported tiers; members who don’t publicly share Jordan as their location may be absent. A profile location is self-reported, not a nationality or identity check.</p>
+    <p className="directory-coverage">Includes public Kaggle locations and, when community submissions are enabled, reviewed Jordan connections. Community-approved profiles are labeled separately. Membership is not a nationality, residency, or identity check.</p>
   </section>
 }
 
@@ -76,12 +76,15 @@ function DirectoryStat({ label, value, note, icon }: { label: string; value?: nu
 
 function PersonCard({ person, onProfile }: { person: DirectoryPerson; onProfile: (username: string) => void }) {
   const joined = new Date(person.joined)
-  const location = person.city === 'Not specified' ? 'Jordan · City not shared' : `${person.city}, Jordan`
+  const location = person.membership_source === 'community_review'
+    ? `Jordan connection${person.city === 'Not specified' ? '' : ` · ${person.city}`}`
+    : person.city === 'Not specified' ? 'Jordan · City not shared' : `${person.city}, Jordan`
   return <button className="directory-person-card" onClick={() => onProfile(person.username)} aria-label={`View ${person.display_name}'s profile`}>
     <div className="directory-person-top"><Avatar member={person} large /><ArrowUpRight size={17} /></div>
     <h3>{person.display_name}</h3><p className="directory-username">@{person.username}</p>
     <div className="directory-tier"><TierBadge tier={person.overall_tier || 'Unspecified'} /><span>{person.progression_opt_out ? 'Progression hidden' : 'Highest Kaggle tier'}</span></div>
     <p className="directory-location"><MapPin size={14} />{location}</p>
+    {person.membership_source === 'community_review' && <p className="directory-organization">Community approved</p>}
     <p className="directory-organization">{person.organization || (Number.isNaN(joined.getTime()) ? 'Kaggle community member' : `On Kaggle since ${joined.getFullYear()}`)}</p>
     <div className={`directory-person-bottom ${person.has_ranking ? 'person-ranked' : ''}`}><span>{person.progression_opt_out ? 'Progression not shared' : person.has_ranking ? `Ranked in ${person.ranked_categories.length} ${person.ranked_categories.length === 1 ? 'category' : 'categories'}` : 'Not ranked yet'}</span><span>View profile <ArrowRight size={13} /></span></div>
   </button>

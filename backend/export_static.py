@@ -9,7 +9,7 @@ from backend.directory import directory
 from backend.ranking import overview, public_achievement, ranked_members
 
 PERSON_FIELDS = {"id", "username", "display_name", "city", "joined", "location_source", "is_demo",
-                 "overall_tier", "organization", "location", "progression_opt_out", "checked_at"}
+                 "overall_tier", "organization", "location", "progression_opt_out", "checked_at", "membership_source"}
 ACHIEVEMENT_FIELDS = {"category", "tier", "points", "global_rank", "gold", "silver", "bronze", "local_rank"}
 META_FIELDS = {"mode", "updated_at", "source", "available_categories", "medals_available",
                "category_tiers_available", "discovery", "reported_total"}

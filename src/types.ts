@@ -5,6 +5,7 @@ export interface Person {
   id: number; username: string; display_name: string; city: string; joined: string
   location_source: string; is_demo: number; overall_tier?: Tier; organization?: string
   location?: string; progression_opt_out?: number; checked_at?: string
+  membership_source?: 'kaggle_location' | 'community_review'; membership_reviewed_at?: string
 }
 export interface Achievement {
   category: Category; tier: Tier | null; points: number

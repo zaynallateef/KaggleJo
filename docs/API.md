@@ -2,6 +2,8 @@
 
 Base path: `/api`. Responses are JSON unless explicitly marked as CSV. No login is required for public read endpoints or nominations. There are no public sync, approval, deletion, or other administrative endpoints.
 
+With Supabase configured, the website uses its restricted `kagglejo_directory` and `kagglejo_nominate` REST RPCs instead of Flask. The directory response is reconciled with active community approvals before applying these search/filter contracts. Review notes and pending submissions stay private. See [Supabase setup and operator commands](SUPABASE.md).
+
 Errors use `{ "error": "Human-readable message" }` with an appropriate HTTP status. Unsupported HTTP methods return 405. Request bodies are limited to 8 KB.
 
 ## Read endpoints

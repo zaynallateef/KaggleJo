@@ -35,9 +35,15 @@ jobs:
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KAGGLEJO_MODE: production
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           python -c "import os; assert os.environ.get('KAGGLE_API_TOKEN'), 'Add the KAGGLE_API_TOKEN repository secret before publishing.'"
-          python -m backend.kaggle_source --db data/publish.db
+          if [ -n "$SUPABASE_URL" ]; then
+            python -m backend.kaggle_source --db data/publish.db --with-supabase
+          else
+            python -m backend.kaggle_source --db data/publish.db
+          fi
       - name: Export public fields only
         run: python -m backend.export_static --db data/publish.db --output public/data/snapshot.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -70,6 +76,9 @@ jobs:
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run build:pages
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

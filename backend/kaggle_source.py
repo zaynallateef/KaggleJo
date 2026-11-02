@@ -15,6 +15,7 @@ from pathlib import Path
 
 from backend.db import CATEGORIES, ROOT, connect, initialize, metadata
 from backend.ranking import ranked_members
+from backend.membership import validate_memberships
 
 SOURCE = "Kaggle public user search"
 SEARCH_CATEGORIES = {"competitions": "competition", "datasets": "dataset", "notebooks": "kernel"}
@@ -26,21 +27,26 @@ CITY_NAMES = {"as salt": "Salt", "as-salt": "Salt", "al salt": "Salt", "as salţ
               "at-tafilah": "Tafilah", "al-mafraq": "Mafraq"}
 
 
-def normalize_person(document):
+def normalize_person(document, membership=None):
     if document.get("documentType") != "USER" or document.get("isPrivate") is True:
         return None
     details = document.get("userDocument") or {}
     location = details.get("userLocation", "").strip()
     parts = [part.strip() for part in location.split(",") if part.strip()]
-    if not parts or parts[-1].casefold() not in ("jordan", "الأردن", "الاردن"):
+    public_jordan = bool(parts and parts[-1].casefold() in ("jordan", "الأردن", "الاردن"))
+    if not public_jordan and not membership:
         return None
     owner = document.get("ownerUser") or {}
     username = owner.get("userName", "")
     user_id = document.get("id")
     if not re.fullmatch(r"[a-zA-Z0-9_]{3,50}", username) or not isinstance(user_id, int) or user_id <= 0:
         raise ValueError("Kaggle returned an invalid public user identifier.")
+    if membership and (membership['username'] != username.lower() or membership['kaggle_id'] != user_id):
+        raise ValueError('The reviewed membership no longer matches the Kaggle account identity.')
     city = parts[0] if len(parts) > 1 else "Not specified"
     city = CITY_NAMES.get(city.casefold(), city)
+    if not public_jordan:
+        city = membership['city']
     opted_out = owner.get("progressionOptOut") is True
     achievements = []
     if not opted_out:
@@ -62,10 +68,11 @@ def normalize_person(document):
             "location_source": f"https://www.kaggle.com/{username}",
             "overall_tier": "Unspecified" if opted_out else TIER_NAMES.get(owner.get("tier"), "Unspecified"),
             "organization": details.get("occupationOrganizationName", "").strip(),
-            "progression_opt_out": opted_out, "achievements": achievements}
+            "progression_opt_out": opted_out, "achievements": achievements,
+            "membership_source": "kaggle_location" if public_jordan else "community_review"}
 
 
-def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100, allow_empty=False):
+def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100, allow_empty=False, normalizer=normalize_person):
     people, seen_tokens, seen_ids = {}, set(), set()
     token, reported, pages = "", 0, 0
     for page in range(1, max_pages + 1):
@@ -79,7 +86,7 @@ def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100, allow_em
             if identifier in seen_ids:
                 raise ValueError("Search pagination repeated a user. Existing data was preserved; retry the snapshot.")
             seen_ids.add(identifier)
-            person = normalize_person(document)
+            person = normalizer(document)
             if person:
                 if person["username"].casefold() in people:
                     raise ValueError("Kaggle returned duplicate usernames.")
@@ -105,13 +112,14 @@ def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100, allow_em
             "pages": pages, "users": list(people.values())}
 
 
-def merge_discovery(fetch_search, usernames=(), progress=None):
+def merge_discovery(fetch_search, usernames=(), progress=None, memberships=None):
     """Union country aliases and exact-username searches, checking every public location.
 
     A failed search aborts the entire replacement. Empty supplementary searches
     are valid; an empty primary country search is still treated as a failure.
     """
     usernames = validate_usernames(usernames)
+    reviewed = validate_memberships(memberships or [])
     primary = fetch_snapshot(lambda token: fetch_search("", "Jordan", token), progress)
     people = {user["username"].casefold(): user for user in primary["users"]}
     identities = {user["id"]: user["username"].casefold() for user in primary["users"]}
@@ -131,10 +139,10 @@ def merge_discovery(fetch_search, usernames=(), progress=None):
         merge(extra["users"])
         checks.append({"location": location, "members": len(extra["users"]), "pages": extra["pages"]})
     unresolved = []
-    for username in usernames:
+    for username in sorted(set(usernames) | set(reviewed)):
         if username in people:
             continue
-        exact, diagnostic = lookup_username(fetch_search, username)
+        exact, diagnostic = lookup_username(fetch_search, username, reviewed.get(username))
         merge(exact)
         if not exact:
             unresolved.append(username)
@@ -151,7 +159,7 @@ def validate_usernames(usernames):
     return sorted({name.lower() for name in usernames})
 
 
-def lookup_username(fetch_search, username):
+def lookup_username(fetch_search, username, membership=None):
     username = validate_usernames([username])[0]
     documents = []
 
@@ -161,13 +169,19 @@ def lookup_username(fetch_search, username):
                          if (doc.get("ownerUser") or {}).get("userName", "").casefold() == username)
         return response
 
-    snapshot = fetch_snapshot(fetch_page, allow_empty=True)
+    def normalize(document):
+        name = (document.get('ownerUser') or {}).get('userName', '').lower()
+        return normalize_person(document, membership if name == username else None)
+
+    snapshot = fetch_snapshot(fetch_page, allow_empty=True, normalizer=normalize)
     exact = [user for user in snapshot["users"] if user["username"].casefold() == username]
     diagnostic = {"username": username, "pages": snapshot["pages"], "status": "not_indexed"}
+    public = next((doc for doc in documents if doc.get("isPrivate") is not True and doc.get("documentType") == "USER"), None)
+    if public:
+        diagnostic.update(kaggle_id=public.get('id'), display_name=(public.get('ownerUser') or {}).get('displayName') or username)
     if exact:
         diagnostic.update(status="included", location=exact[0]["location"])
     elif documents:
-        public = next((doc for doc in documents if doc.get("isPrivate") is not True and doc.get("documentType") == "USER"), None)
         location = ((public or {}).get("userDocument") or {}).get("userLocation", "").strip()
         diagnostic.update(status="outside_jordan" if location else "location_not_shared" if public else "private")
         if location:
@@ -216,12 +230,12 @@ def search_client():
         yield fetch_search
 
 
-def download_snapshot(progress=None, usernames=()):
+def download_snapshot(progress=None, usernames=(), memberships=None):
     with search_client() as fetch_search:
-        return merge_discovery(fetch_search, usernames, progress)
+        return merge_discovery(fetch_search, usernames, progress, memberships)
 
 
-def apply_snapshot(snapshot, db_path=None):
+def apply_snapshot(snapshot, db_path=None, memberships=None):
     if (snapshot.get("schema_version") != 1 or snapshot.get("complete") is not True
             or snapshot.get("country") != "Jordan" or not snapshot.get("users")):
         raise ValueError("Expected a complete Jordan search snapshot.")
@@ -232,10 +246,15 @@ def apply_snapshot(snapshot, db_path=None):
     users = [{**user, "city": CITY_NAMES.get(user["city"].casefold(), user["city"])} for user in snapshot["users"]]
     # Revalidate persisted input before making any database changes.
     ids, names = set(), set()
+    reviewed = validate_memberships(memberships or [])
     for user in users:
         parts = [p.strip().casefold() for p in user.get("location", "").split(",") if p.strip()]
         username = user.get("username", "")
-        if (not parts or parts[-1] not in ("jordan", "الأردن", "الاردن") or
+        community_review = user.get('membership_source') == 'community_review'
+        approval = reviewed.get(username.lower())
+        if community_review and (not approval or approval['kaggle_id'] != user['id'] or approval['city'] != user['city']):
+            raise ValueError('A community profile requires a matching active Supabase approval.')
+        if ((not community_review and (not parts or parts[-1] not in ("jordan", "الأردن", "الاردن"))) or
                 not re.fullmatch(r"[a-zA-Z0-9_]{3,50}", username) or
                 user["id"] in ids or username.casefold() in names):
             raise ValueError("Snapshot contains invalid or duplicated Jordan profiles.")
@@ -260,11 +279,12 @@ def apply_snapshot(snapshot, db_path=None):
         for user in users:
             db.execute("""INSERT INTO members
                 (id, username, display_name, city, joined, location_source, is_demo,
-                 overall_tier, organization, location, progression_opt_out, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
+                 overall_tier, organization, location, progression_opt_out, checked_at, membership_source)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)""",
                        (user["id"], user["username"], user["display_name"], user["city"], user["joined"],
                         f"https://www.kaggle.com/{user['username']}", user["overall_tier"], user["organization"],
-                        user["location"], int(user["progression_opt_out"]), recorded))
+                        user["location"], int(user["progression_opt_out"]), recorded,
+                        'community_review' if user.get('membership_source') == 'community_review' else 'kaggle_location'))
             for achievement in user.get("achievements", []):
                 db.execute("""INSERT INTO achievements
                     (member_id, category, tier, points, global_rank, gold, silver, bronze, medals_known)
@@ -277,7 +297,8 @@ def apply_snapshot(snapshot, db_path=None):
                            (row["username"], category, recorded, row["points"], row["local_rank"], row["global_rank"]))
         db.executemany("INSERT OR REPLACE INTO metadata VALUES (?, ?)", [
             ("mode", "live"), ("updated_at", recorded), ("source", SOURCE),
-            ("discovery", "Public profile location set to Jordan"),
+            ("discovery", "Public Jordan locations and reviewed community connections" if any(
+                user.get('membership_source') == 'community_review' for user in users) else "Public profile location set to Jordan"),
             ("available_categories", ",".join(SEARCH_CATEGORIES)),
             ("medals_available", "false"), ("category_tiers_available", "false"),
             ("reported_total", str(snapshot["reported_total"]))])
@@ -291,6 +312,7 @@ def main():
     parser.add_argument("--cache", default=str(ROOT / "data/kaggle-users.json"))
     parser.add_argument("--from-cache", action="store_true")
     parser.add_argument("--fetch-only", action="store_true")
+    parser.add_argument('--with-supabase', action='store_true', help='Load active community approvals and publish the completed public snapshot to Supabase.')
     parser.add_argument("--username", action="append", default=[], help="Also check an exact missing username (repeatable).")
     parser.add_argument("--check-username", help="Diagnose one username without changing data or downloading the country directory.")
     parser.add_argument("--usernames-file", default=str(ROOT / "data/discovery-usernames.json"),
@@ -302,6 +324,12 @@ def main():
             _, diagnostic = lookup_username(fetch_search, username)
         print(json.dumps(diagnostic, ensure_ascii=True))
         return
+    store = None
+    memberships = []
+    if args.with_supabase:
+        from backend.supabase_store import SupabaseStore
+        store = SupabaseStore()
+        memberships = store.memberships()
     cache = Path(args.cache)
     if args.from_cache:
         snapshot = json.loads(cache.read_text(encoding="utf-8"))
@@ -310,7 +338,7 @@ def main():
         registered = json.loads(usernames_path.read_text(encoding="utf-8")) if usernames_path.exists() else []
         usernames = validate_usernames([*validate_usernames(registered), *args.username])
         snapshot = download_snapshot(lambda page, count, total: print(
-            f"Page {page}: {count} public Jordan profiles / {total} reported", flush=True), usernames)
+            f"Page {page}: {count} public Jordan profiles / {total} reported", flush=True), usernames, memberships)
         for check in snapshot.get("discovery_checks", []):
             print(json.dumps(check, ensure_ascii=True), flush=True)
         if snapshot.get("unresolved_usernames"):
@@ -328,7 +356,13 @@ def main():
             filename = datetime.now(timezone.utc).strftime("before-search-%Y%m%d-%H%M%S-%f.db")
             with sqlite3.connect(backup_dir / filename) as backup:
                 db.backup(backup)
-        print(json.dumps(apply_snapshot(snapshot, args.db), indent=2))
+        print(json.dumps(apply_snapshot(snapshot, args.db, memberships), indent=2))
+        if store:
+            from backend.export_static import build_snapshot
+            found = {(user['username'].lower(), user['id']) for user in snapshot['users']}
+            checks = [{'username': row['username'], 'kaggle_id': row['kaggle_id'], 'reviewed_at': row['reviewed_at'],
+                       'available': (row['username'], row['kaggle_id']) in found} for row in memberships]
+            print(json.dumps(store.publish(build_snapshot(args.db), checks), indent=2))
 
 
 if __name__ == "__main__":

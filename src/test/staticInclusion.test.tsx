@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { AddProfileDialog } from '../components/AddProfileDialog'
 
-vi.mock('../api', () => ({ IS_STATIC: true, request: vi.fn() }))
+vi.mock('../api', () => ({ IS_STATIC: true, HAS_SUPABASE: false, request: vi.fn() }))
 
 it('explains automatic inclusion without collecting credentials or pretending to save a nomination', () => {
   render(<AddProfileDialog close={vi.fn()} />)

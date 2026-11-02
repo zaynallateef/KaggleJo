@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": "^24.15.0 || >=26.0.0" },
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:all": "node scripts/dev.mjs",
@@ -11,6 +13,7 @@
     "build:pages": "tsc -b && vite build --mode pages",
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:db": "node scripts/test-supabase.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:api": "python -m unittest discover -s backend/tests -v"
   },
@@ -21,6 +24,7 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.14",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
