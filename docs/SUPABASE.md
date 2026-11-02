@@ -1,5 +1,7 @@
 # Supabase community directory
 
+**Production now uses [automatic submissions](AUTOMATIC_SUBMISSIONS.md), without manual review.** That guide supersedes the submission/review behavior below. The existing grants, directory reads, snapshot publication, and operator removal controls still apply. The sections below preserve the earlier manual-review workflow for operator reference.
+
 Supabase holds the last successful public Kaggle snapshot, private profile submissions, and a separate registry of approved Jordan community connections. The GitHub Pages frontend reads that data directly through restricted database functions. Python/GitHub Actions remains responsible for fetching Kaggle; Supabase does not make missing location fields reappear.
 
 ## Behavior

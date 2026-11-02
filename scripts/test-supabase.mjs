@@ -1,6 +1,6 @@
 // Real PostgreSQL behavior in an isolated in-memory PGlite database. No network.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 
 const db = new PGlite()
@@ -72,6 +72,42 @@ try {
   await assert.rejects(nominate('over_limit'), /submission limit/); assertions++
   await db.exec('reset role')
   check((await db.query("select count(*)::int as n from public.kagglejo_nominations where username='over_limit'")).rows[0].n === 0, 'Rate-limited submissions do not persist.')
+  // Vault encryption is supplied by hosted Supabase. These test-only stubs
+  // exercise permission boundaries and rotation without pretending to test encryption.
+  await db.exec(`create schema vault;
+    create table vault.secrets(id uuid primary key default gen_random_uuid(),name text unique,secret text);
+    create view vault.decrypted_secrets as select id,name,secret as decrypted_secret from vault.secrets;
+    create function vault.create_secret(value text,name text,description text) returns uuid language sql as
+      'insert into vault.secrets(name,secret) values(name,value) returning id';
+    create function vault.update_secret(identifier uuid,value text) returns void language sql as
+      'update vault.secrets set secret=value where id=identifier';`)
+  const migrations = new URL('../supabase/migrations/', import.meta.url)
+  for (const file of (await readdir(migrations)).filter(name => name.endsWith('_automatic_submissions.sql')).sort())
+    await db.exec(await readFile(new URL(file, migrations), 'utf8'))
+  for (const role of ['anon', 'authenticated']) {
+    await db.exec(`set role ${role}`)
+    await denied("select public.kagglejo_accept_submission('new_member',3,'New Member')")
+    await denied("select public.kagglejo_configure_automation('TEST_TOKEN_NOT_A_REAL_CREDENTIAL')")
+    await denied('select public.kagglejo_automation_token()')
+    await denied('select kagglejo_private.automation_token()')
+  }
+  await db.exec('set role service_role')
+  await db.query('select public.kagglejo_configure_automation($1)', ['TEST_TOKEN_NOT_A_REAL_CREDENTIAL'])
+  check((await db.query('select public.kagglejo_automation_token() as token')).rows[0].token === 'TEST_TOKEN_NOT_A_REAL_CREDENTIAL', 'Only the service role can retrieve the automation credential.')
+  await db.query('select public.kagglejo_configure_automation($1)', ['ROTATED_TEST_TOKEN_NOT_A_REAL_CREDENTIAL'])
+  check((await db.query('select public.kagglejo_automation_token() as token')).rows[0].token.startsWith('ROTATED'), 'Automation credential rotation updates the existing secret.')
+  await assert.rejects(db.query("select public.kagglejo_accept_submission('new_member',0,'New Member')"), error => error.code === '22023'); assertions++
+  check((await db.query("select public.kagglejo_accept_submission('new_member',3,'New Member') as result")).rows[0].result.status === 'approved', 'Exact account checks accept pending submissions without manual review.')
+  check((await db.query("select status from public.kagglejo_nominations where username='new_member'")).rows[0].status === 'approved', 'Membership and submission status change together.')
+  check((await db.query("select public.kagglejo_accept_submission('new_member',999,'Impostor') as result")).rows[0].result.status === 'approved', 'Duplicate submissions do not overwrite an existing account.')
+  check((await db.query("select kaggle_id from public.kagglejo_memberships where username='new_member'")).rows[0].kaggle_id === 3, 'Existing real account ID is preserved.')
+  check((await db.query("select public.kagglejo_accept_submission('reviewed_member',2,'Revoked') as result")).rows[0].result.status === 'blocked', 'Automation cannot restore revoked memberships.')
+  await db.exec("update public.kagglejo_nominations set status='rejected' where username='new_member'; update public.kagglejo_memberships set revoked_at=now() where username='new_member'")
+  check((await db.query("select public.kagglejo_accept_submission('new_member',3,'New Member') as result")).rows[0].result.status === 'blocked', 'A new submission cannot undo an operator removal.')
+  await db.exec("update public.kagglejo_memberships set revoked_at=null where username='new_member'; set role anon")
+  const automatic = (await read()).memberships.find(row => row.username === 'new_member')
+  check(automatic?.review_basis === 'automatic_submission', 'The public registry identifies automatic submissions honestly.')
+  check(!JSON.stringify(await read()).includes('ROTATED_TEST_TOKEN'), 'Automation credentials never enter the public directory.')
   console.log(`Supabase database checks passed (${assertions} assertions).`)
 } finally {
   await db.close()

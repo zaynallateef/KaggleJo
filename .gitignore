@@ -18,3 +18,4 @@ data/backups/
 artifacts/
 .npm-cache/
 .cache/
+supabase/.temp/

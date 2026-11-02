@@ -29,7 +29,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (IS_STATIC || HAS_SUPABASE) {
     if (HAS_SUPABASE && path === '/nominations' && init?.method === 'POST') {
       if (typeof init.body !== 'string') throw new Error('Send valid profile fields.')
-      return await submitNomination(JSON.parse(init.body)) as T
+      const result = await submitNomination(JSON.parse(init.body))
+      if (result.status === 'approved') invalidateSnapshot()
+      return result as T
     }
     if (init?.method && init.method !== 'GET') throw new Error('Profile inclusion is automatic on the public site. Set your public Kaggle location to Jordan.')
     const data = await loadStaticSnapshot()

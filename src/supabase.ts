@@ -7,7 +7,7 @@ export const HAS_SUPABASE = Boolean(SUPABASE_URL && publicKey)
 const validCities = new Set(['Amman', 'Irbid', 'Zarqa', 'Aqaba', 'Salt', 'Madaba', 'Karak', 'Mafraq', 'Ajloun', 'Jerash', 'Tafilah', 'Maan', 'Other', 'Not specified'])
 interface Membership {
   username: string; kaggle_id: number; display_name: string; city: string
-  evidence_url: string; review_basis: 'public_profile' | 'owner_opt_in'; reviewed_at: string
+  evidence_url: string; review_basis: 'public_profile' | 'owner_opt_in' | 'automatic_submission'; reviewed_at: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -54,7 +54,7 @@ export function mergeMemberships(envelope: unknown): PublicSnapshot {
       || !Number.isSafeInteger(raw.kaggle_id) || Number(raw.kaggle_id) <= 0 || typeof raw.display_name !== 'string'
       || !raw.display_name.trim() || typeof raw.city !== 'string' || !validCities.has(raw.city)
       || raw.evidence_url !== `https://www.kaggle.com/${raw.username}`
-      || !['public_profile', 'owner_opt_in'].includes(String(raw.review_basis))
+      || !['public_profile', 'owner_opt_in', 'automatic_submission'].includes(String(raw.review_basis))
       || typeof raw.reviewed_at !== 'string' || !Number.isFinite(Date.parse(raw.reviewed_at))
       || approvals.has(raw.username) || ids.has(Number(raw.kaggle_id))) throw new Error('The community registry is invalid.')
     const approval = raw as unknown as Membership
@@ -122,9 +122,13 @@ export async function loadSupabaseDirectory(): Promise<PublicSnapshot> {
   return mergeMemberships(await supabaseRpc('kagglejo_directory'))
 }
 
-export async function submitNomination(payload: { username: string; city: string; evidence_url: string; confirmed: boolean }): Promise<{ message: string }> {
-  const result = await supabaseRpc<unknown>('kagglejo_nominate', { p_username: payload.username, p_city: payload.city,
-    p_evidence_url: payload.evidence_url, p_confirmed: payload.confirmed })
-  if (!isRecord(result) || typeof result.message !== 'string') throw new Error('The community service returned an invalid response.')
-  return { message: result.message }
+export async function submitNomination(payload: { username: string; city: string; evidence_url: string; confirmed: boolean }): Promise<{ message: string; status: 'approved' | 'checking' }> {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/submit-profile`, {
+    method: 'POST', headers: { apikey: publicKey, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), cache: 'no-store',
+  })
+  const result: unknown = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(isRecord(result) && typeof result.message === 'string' ? result.message : 'The community service is unavailable. Please try again shortly.')
+  if (!isRecord(result) || typeof result.message !== 'string' || !['approved', 'checking'].includes(String(result.status)))
+    throw new Error('The community service returned an invalid response.')
+  return { message: result.message, status: result.status as 'approved' | 'checking' }
 }

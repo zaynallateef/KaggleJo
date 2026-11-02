@@ -119,7 +119,7 @@ describe('KaggleJo journeys (mock API)', () => {
     expect(within(dialog).getByLabelText('Public Kaggle profile')).toHaveValue('https://www.kaggle.com/new_member')
     await user.click(within(dialog).getByRole('checkbox'))
     await user.click(within(dialog).getByRole('button', { name: 'Submit for review' }))
-    expect(await within(dialog).findByText('You’re on the list.')).toBeInTheDocument()
+    expect(await within(dialog).findByText('Submitted for review.')).toBeInTheDocument()
     expect(within(dialog).getByText(/Profile submitted for review/)).toBeInTheDocument()
     expect(screen.getAllByRole('checkbox', { name: /Compare/ })).toHaveLength(3)
   })

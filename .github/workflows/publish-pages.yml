@@ -44,6 +44,7 @@ jobs:
         run: |
           python -c "import os; assert os.environ.get('KAGGLE_API_TOKEN'), 'Add the KAGGLE_API_TOKEN repository secret before publishing.'"
           if [ -n "$SUPABASE_URL" ]; then
+            python -m backend.auto_approve
             python -m backend.kaggle_source --db data/publish.db --with-supabase
           else
             python -m backend.kaggle_source --db data/publish.db

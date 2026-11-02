@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from urllib.error import HTTPError
 
 from backend.app import create_app
+from backend.auto_approve import process_submissions
 from backend.export_static import build_snapshot
 from backend.kaggle_source import apply_snapshot, fetch_snapshot, merge_discovery
 from backend.membership import validate_memberships
@@ -119,3 +120,28 @@ class SupabaseTransportTests(unittest.TestCase):
         transport = Mock(return_value=io.BytesIO(json.dumps([membership()] * 1001).encode()))
         with self.assertRaisesRegex(ValueError, 'truncated'):
             SupabaseStore('https://example.supabase.co', 'sb_secret_test', transport).memberships()
+
+
+class AutomaticSubmissionTests(unittest.TestCase):
+    def test_queue_uses_exact_public_identity_and_leaves_unknown_accounts_for_retry(self):
+        store = Mock()
+        store.request.side_effect = [[{'username': 'loplop05'}, {'username': 'missing_user'}], {'status': 'approved'}]
+        def search(query, location, token):
+            docs = [document(902, 'loplop05', location=''), document(903, 'loplop050', location='')] if query == 'loplop05' else []
+            return {'documents': docs, 'totalDocuments': len(docs)}
+        result = process_submissions(store, search)
+        self.assertEqual(result, {'approved': 1, 'awaiting_public_account': 1, 'blocked': 0})
+        self.assertEqual(store.request.call_args_list[1].args, ('rpc/kagglejo_accept_submission', {
+            'p_username': 'loplop05', 'p_kaggle_id': 902, 'p_display_name': 'Loplop05'}))
+
+    def test_private_accounts_are_never_accepted(self):
+        store = Mock()
+        store.request.return_value = [{'username': 'private_user'}]
+        doc = {**document(902, 'private_user'), 'isPrivate': True}
+        result = process_submissions(store, lambda *_: {'documents': [doc], 'totalDocuments': 1})
+        self.assertEqual(result['awaiting_public_account'], 1)
+        store.request.assert_called_once()
+
+    def test_automatic_membership_basis_is_valid_without_claiming_owner_consent(self):
+        row = {**membership(), 'review_basis': 'automatic_submission'}
+        self.assertEqual(validate_memberships([row])['loplop05']['review_basis'], 'automatic_submission')

@@ -18,7 +18,7 @@ def validate_memberships(rows):
                 or type(identifier) is not int or identifier <= 0 or identifier in ids or name in by_name
                 or row.get('city') not in COMMUNITY_CITIES
                 or row.get('evidence_url') != f'https://www.kaggle.com/{name}'
-                or row.get('review_basis') not in ('public_profile', 'owner_opt_in')):
+                or row.get('review_basis') not in ('public_profile', 'owner_opt_in', 'automatic_submission')):
             raise ValueError('Invalid or duplicate reviewed membership identity or evidence.')
         try:
             stamp = datetime.fromisoformat(row['reviewed_at'].replace('Z', '+00:00'))

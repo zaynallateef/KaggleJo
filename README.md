@@ -10,8 +10,11 @@ A community directory and leaderboard for Kagglers who publicly share a location
 - Name/username search, city and tier filters, shareable filter URLs, and pagination.
 - Top-three profiles, category-specific community statistics, and city browsing.
 - Profile details, category-by-category comparison of up to three people, and CSV export.
-- Public profile submissions saved to a private operator review queue.
+- Automatic acceptance of submitted public Kaggle profiles, with community connections labeled separately.
 - Streaming import of official Meta Kaggle CSVs, optional downloads through Kaggle’s CLI, atomic snapshot replacement, and stored ranking history.
-- Option to add people by adding their profile and auto accept.
+- Add a profile without manual acceptance; available statistics update during the next hourly sync.
 
 ## You can check the website in the Github Pages above
+
+
+Automatic submission details and operator controls: [integration guide](docs/AUTOMATIC_SUBMISSIONS.md).
