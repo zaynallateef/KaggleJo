@@ -9,6 +9,7 @@ import math
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,7 +65,7 @@ def normalize_person(document):
             "progression_opt_out": opted_out, "achievements": achievements}
 
 
-def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100):
+def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100, allow_empty=False):
     people, seen_tokens, seen_ids = {}, set(), set()
     token, reported, pages = "", 0, 0
     for page in range(1, max_pages + 1):
@@ -97,14 +98,85 @@ def fetch_snapshot(fetch_page, progress=None, pause=.25, max_pages=100):
             time.sleep(pause)
     else:
         raise ValueError("Search page limit reached; refusing to publish an incomplete snapshot.")
-    if not people or (reported and len(seen_ids) < reported):
+    if (not people and not allow_empty) or (reported and len(seen_ids) < reported):
         raise ValueError("Kaggle search was empty or incomplete. Existing data was preserved.")
     return {"schema_version": 1, "source": SOURCE, "country": "Jordan", "complete": True,
             "fetched_at": datetime.now(timezone.utc).isoformat(), "reported_total": reported,
             "pages": pages, "users": list(people.values())}
 
 
-def download_snapshot(progress=None):
+def merge_discovery(fetch_search, usernames=(), progress=None):
+    """Union country aliases and exact-username searches, checking every public location.
+
+    A failed search aborts the entire replacement. Empty supplementary searches
+    are valid; an empty primary country search is still treated as a failure.
+    """
+    usernames = validate_usernames(usernames)
+    primary = fetch_snapshot(lambda token: fetch_search("", "Jordan", token), progress)
+    people = {user["username"].casefold(): user for user in primary["users"]}
+    identities = {user["id"]: user["username"].casefold() for user in primary["users"]}
+    checks = [{"location": "Jordan", "members": len(people), "pages": primary["pages"]}]
+
+    def merge(users):
+        for user in users:
+            name = user["username"].casefold()
+            if ((name in people and people[name]["id"] != user["id"]) or
+                    (user["id"] in identities and identities[user["id"]] != name)):
+                raise ValueError("Conflicting user identities across discovery searches.")
+            people.setdefault(name, user)
+            identities[user["id"]] = name
+
+    for location in ("الأردن", "الاردن"):
+        extra = fetch_snapshot(lambda token: fetch_search("", location, token), allow_empty=True)
+        merge(extra["users"])
+        checks.append({"location": location, "members": len(extra["users"]), "pages": extra["pages"]})
+    unresolved = []
+    for username in usernames:
+        if username in people:
+            continue
+        exact, diagnostic = lookup_username(fetch_search, username)
+        merge(exact)
+        if not exact:
+            unresolved.append(username)
+        checks.append({**diagnostic, "members": len(exact)})
+    return {**primary, "users": list(people.values()), "discovery_checks": checks,
+            "unresolved_usernames": unresolved, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+def validate_usernames(usernames):
+    if not isinstance(usernames, (list, tuple)) or len(usernames) > 100:
+        raise ValueError("Provide a list of at most 100 discovery usernames.")
+    if any(not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9_]{3,50}", name) for name in usernames):
+        raise ValueError("Discovery usernames must contain 3–50 letters, numbers, or underscores.")
+    return sorted({name.lower() for name in usernames})
+
+
+def lookup_username(fetch_search, username):
+    username = validate_usernames([username])[0]
+    documents = []
+
+    def fetch_page(token):
+        response = fetch_search(username, "", token)
+        documents.extend(doc for doc in response.get("documents", [])
+                         if (doc.get("ownerUser") or {}).get("userName", "").casefold() == username)
+        return response
+
+    snapshot = fetch_snapshot(fetch_page, allow_empty=True)
+    exact = [user for user in snapshot["users"] if user["username"].casefold() == username]
+    diagnostic = {"username": username, "pages": snapshot["pages"], "status": "not_indexed"}
+    if exact:
+        diagnostic.update(status="included", location=exact[0]["location"])
+    elif documents:
+        public = next((doc for doc in documents if doc.get("isPrivate") is not True and doc.get("documentType") == "USER"), None)
+        location = ((public or {}).get("userDocument") or {}).get("userLocation", "").strip()
+        diagnostic.update(status="outside_jordan" if location else "location_not_shared" if public else "private")
+        if location:
+            diagnostic["location"] = location
+    return exact, diagnostic
+
+
+@contextmanager
+def search_client():
     try:
         from kaggle import api
         from requests.adapters import HTTPAdapter
@@ -127,19 +199,26 @@ def download_snapshot(progress=None):
                         status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
         session.mount("https://", TimedAdapter(max_retries=retries))
 
-        def fetch_page(token):
+        def fetch_search(query, location, token):
             request = ListEntitiesRequest()
             filters, users = ListEntitiesFilters(), ApiSearchUsersFilters()
             filters.document_types = [DocumentType.USER]
             filters.privacy = PrivacyFilter.PUBLIC
-            users.user_locations = ["Jordan"]
-            filters.user_filters = users
+            filters.query = query
+            if location:
+                users.user_locations = [location]
+                filters.user_filters = users
             request.filters, request.page_size, request.page_token = filters, 100, token
             request.users_order_by = SearchUsersOrderBy.SEARCH_USERS_ORDER_BY_DISPLAY_NAME
             response = client.search.search_api_client.list_entities(request)
             return type(response).to_dict(response)
 
-        return fetch_snapshot(fetch_page, progress)
+        yield fetch_search
+
+
+def download_snapshot(progress=None, usernames=()):
+    with search_client() as fetch_search:
+        return merge_discovery(fetch_search, usernames, progress)
 
 
 def apply_snapshot(snapshot, db_path=None):
@@ -212,13 +291,30 @@ def main():
     parser.add_argument("--cache", default=str(ROOT / "data/kaggle-users.json"))
     parser.add_argument("--from-cache", action="store_true")
     parser.add_argument("--fetch-only", action="store_true")
+    parser.add_argument("--username", action="append", default=[], help="Also check an exact missing username (repeatable).")
+    parser.add_argument("--check-username", help="Diagnose one username without changing data or downloading the country directory.")
+    parser.add_argument("--usernames-file", default=str(ROOT / "data/discovery-usernames.json"),
+                        help="Persistent JSON list of usernames to check outside the country filter.")
     args = parser.parse_args()
+    if args.check_username:
+        username = validate_usernames([args.check_username])[0]
+        with search_client() as fetch_search:
+            _, diagnostic = lookup_username(fetch_search, username)
+        print(json.dumps(diagnostic, ensure_ascii=True))
+        return
     cache = Path(args.cache)
     if args.from_cache:
         snapshot = json.loads(cache.read_text(encoding="utf-8"))
     else:
+        usernames_path = Path(args.usernames_file)
+        registered = json.loads(usernames_path.read_text(encoding="utf-8")) if usernames_path.exists() else []
+        usernames = validate_usernames([*validate_usernames(registered), *args.username])
         snapshot = download_snapshot(lambda page, count, total: print(
-            f"Page {page}: {count} public Jordan profiles / {total} reported", flush=True))
+            f"Page {page}: {count} public Jordan profiles / {total} reported", flush=True), usernames)
+        for check in snapshot.get("discovery_checks", []):
+            print(json.dumps(check, ensure_ascii=True), flush=True)
+        if snapshot.get("unresolved_usernames"):
+            print("Not found with a public Jordan location: " + ", ".join(snapshot["unresolved_usernames"]), flush=True)
         cache.parent.mkdir(parents=True, exist_ok=True)
         temporary = cache.with_suffix(".tmp")
         temporary.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")

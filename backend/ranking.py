@@ -1,6 +1,7 @@
 """Category-specific ranks. Filters never renumber Jordan-wide positions."""
 import math
 from backend.db import metadata
+from backend.search import matches_person, search_terms
 
 
 def ranked_members(db, category):
@@ -25,8 +26,9 @@ def public_achievement(row):
 
 def leaderboard(db, category, query="", city="", tier="", page=1, page_size=10):
     all_rows = ranked_members(db, category)
+    terms = search_terms(query)
     filtered = [row for row in all_rows if
-                (not query or query.casefold() in (row["display_name"] + " " + row["username"]).casefold())
+                matches_person(row, terms)
                 and (not city or row["city"] == city)
                 and (not tier or row["tier"] == tier)]
     total = len(filtered)

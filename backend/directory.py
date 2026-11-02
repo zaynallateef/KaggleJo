@@ -1,6 +1,7 @@
 """The community directory includes every imported member, regardless of ranking."""
 import math
 from backend.db import metadata
+from backend.search import search_terms
 
 RANKED = """EXISTS (SELECT 1 FROM achievements a WHERE a.member_id=m.id
              AND a.global_rank > 0 AND a.tier IN ('Expert','Master','Grandmaster','Unknown'))
@@ -9,10 +10,10 @@ RANKED = """EXISTS (SELECT 1 FROM achievements a WHERE a.member_id=m.id
 
 def directory(db, query="", city="", tier="", status="", sort="name", page=1, page_size=24):
     conditions, args = [], []
-    if query:
-        escaped = query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        conditions.append("(LOWER(m.username) LIKE ? ESCAPE '\\' OR LOWER(m.display_name) LIKE ? ESCAPE '\\' OR LOWER(m.organization) LIKE ? ESCAPE '\\')")
-        args.extend([f"%{escaped}%"] * 3)
+    for term in search_terms(query):
+        # instr is literal (including % and _) and SQLite LOWER is ASCII-only.
+        conditions.append("(instr(search_text(m.username), ?) > 0 OR instr(search_text(m.display_name), ?) > 0 OR instr(search_text(m.organization), ?) > 0)")
+        args.extend([term] * 3)
     if city:
         conditions.append("m.city=?"); args.append(city)
     if tier:

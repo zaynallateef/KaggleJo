@@ -6,7 +6,7 @@ from pathlib import Path
 
 from backend.app import create_app
 from backend.db import connect
-from backend.kaggle_source import apply_snapshot, fetch_snapshot, normalize_person
+from backend.kaggle_source import apply_snapshot, fetch_snapshot, lookup_username, merge_discovery, normalize_person, validate_usernames
 
 
 def document(identifier, username, location="Amman, Amman Governorate, Jordan", tier="CONTRIBUTOR", ranked=False, opted_out=False):
@@ -91,6 +91,17 @@ class DirectoryTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/members?sort=newest').status_code, 200)
         self.assertEqual(self.client.get('/api/members?sort=tier').json['items'][0]['overall_tier'], 'Expert')
 
+    def test_search_supports_handles_links_and_reordered_unicode_names(self):
+        with connect(self.db) as db:
+            db.execute("UPDATE members SET display_name=? WHERE username='ranked_person'", ("SÁRA خَالِد",))
+        for path in ('/api/members', '/api/leaderboard'):
+            for query in ('@RANKED_PERSON', 'https://www.kaggle.com/ranked_person/', 'خالد sara', 'University sara'):
+                with self.subTest(path=path, query=query):
+                    result = self.client.get(path, query_string={'q': query}).json
+                    self.assertEqual(result['total'], 1)
+                    self.assertEqual(result['items'][0]['username'], 'ranked_person')
+        self.assertEqual(self.client.get('/api/members', query_string={'q': '_contributor'}).json['total'], 1)
+
     def test_directory_rejects_invalid_queries(self):
         for query in ['page=0', 'page_size=101', 'status=admin', 'sort=password', 'tier=Administrator', 'city=Paris']:
             with self.subTest(query=query):
@@ -134,6 +145,58 @@ class DirectoryTests(unittest.TestCase):
         apply_snapshot(self.snapshot, self.db)
         with connect(self.db) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM nominations').fetchone()[0], 1)
+
+    def test_discovery_unions_aliases_and_exact_usernames_without_fuzzy_matches(self):
+        responses = {
+            ('', 'Jordan'): [document(901, 'first_person')],
+            ('', 'الأردن'): [document(901, 'first_person'), document(902, 'arabic_person', location='الأردن')],
+            ('', 'الاردن'): [],
+            ('loplop05', ''): [document(903, 'loplop05'), document(904, 'loplop050')],
+            ('elsewhere', ''): [document(905, 'elsewhere', location='South Jordan, Utah, United States')],
+        }
+        def search(query, location, token):
+            self.assertEqual(token, '')
+            docs = responses[(query, location)]
+            return {'documents': docs, 'totalDocuments': len(docs)}
+        result = merge_discovery(search, ['LOPLOP05', 'elsewhere'])
+        self.assertEqual({u['username'] for u in result['users']}, {'first_person', 'arabic_person', 'loplop05'})
+        self.assertEqual(result['unresolved_usernames'], ['elsewhere'])
+        self.assertEqual(apply_snapshot(result, self.db)['members'], 3)
+
+    def test_failed_supplementary_discovery_preserves_data(self):
+        def search(query, location, token):
+            docs = [document(991, 'first_person')]
+            return {'documents': docs, 'totalDocuments': 1 if location == 'Jordan' else 2}
+        with self.assertRaises(ValueError):
+            merge_discovery(search)
+        self.assertEqual(self.client.get('/api/members').json['total'], 4)
+
+    def test_discovery_rejects_identity_conflicts_and_invalid_registry(self):
+        def search(query, location, token):
+            docs = [document(991, 'first_person' if location == 'Jordan' else 'different_person')]
+            return {'documents': docs, 'totalDocuments': 1}
+        with self.assertRaises(ValueError):
+            merge_discovery(search)
+        for invalid in ('username', [None], ['https://www.kaggle.com/name'], ['name'] * 101):
+            with self.assertRaises(ValueError):
+                validate_usernames(invalid)
+
+    def test_username_diagnostics_explain_missing_profiles_and_ignore_similar_names(self):
+        cases = [
+            ([], 'not_indexed'),
+            ([document(991, 'loplop050')], 'not_indexed'),
+            ([document(991, 'loplop05', location='')], 'location_not_shared'),
+            ([document(991, 'loplop05', location='South Jordan, Utah, United States')], 'outside_jordan'),
+            ([document(991, 'loplop05')], 'included'),
+            ([{**document(991, 'loplop05'), 'isPrivate': True}], 'private'),
+        ]
+        for docs, status in cases:
+            with self.subTest(status=status):
+                people, diagnostic = lookup_username(lambda q, loc, token: {'documents': docs, 'totalDocuments': len(docs)}, 'loplop05')
+                self.assertEqual(diagnostic['status'], status)
+                self.assertEqual(len(people), int(status == 'included'))
+                if status in ('not_indexed', 'location_not_shared', 'private'):
+                    self.assertNotIn('location', diagnostic)
 
 
 if __name__ == '__main__':

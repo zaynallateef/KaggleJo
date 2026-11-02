@@ -32,6 +32,12 @@ describe('published snapshot queries', () => {
     expect(() => staticResponse(snapshot, '/leaderboard?category=admin')).toThrow()
     expect(() => staticResponse(snapshot, '/members?sort=secret')).toThrow()
   })
+  it('accepts profile URLs, handles, and reordered search words', () => {
+    for (const q of ['@NEW_MEMBER', 'https://www.kaggle.com/new_member/', 'University New']) {
+      expect((staticResponse(snapshot, `/members?${new URLSearchParams({ q })}`) as DirectoryResponse).total).toBe(1)
+    }
+    expect((staticResponse(snapshot, '/leaderboard?q=%40RANKED_MEMBER') as Rankings).total).toBe(1)
+  })
   it('looks up profiles case-insensitively and refuses unknown or prototype names', () => {
     expect(staticResponse(snapshot, '/members/NEW_MEMBER')).toMatchObject({ member: { username: 'new_member' }, achievements: [] })
     expect(() => staticResponse(snapshot, '/members/__proto__')).toThrow('not found')

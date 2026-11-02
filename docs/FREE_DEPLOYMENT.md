@@ -50,11 +50,14 @@ The custom workflow follows [GitHub's Pages workflow setup](https://docs.github.
 ## Refresh behavior
 
 - The workflow runs on pushes to `main`, manual runs, and at minute **17 of every hour**, in UTC.
-- Python fetches every page of public-user search results filtered to Jordan. It checks the returned public location, includes people with and without rankings, and respects progression opt-outs.
+- Python fetches every page of public-user search results for the English and Arabic country names. It also checks exact usernames from `data/discovery-usernames.json` without the country filter. It checks every returned public location, includes people with and without rankings, and respects progression opt-outs.
 - A validated snapshot is exported to JSON and deployed with the built site. Invalid, incomplete, or empty fetches fail before deployment; the last successful site remains live.
 - Open browser pages check for updated data every **five minutes**, and when the tab becomes visible again. Normal browser/CDN caching can add delay.
+- Clicking the snapshot refresh button immediately revalidates published JSON, bypassing the browser's in-memory snapshot cache. It shows the snapshot time in Amman; it does not launch a new Actions job or query Kaggle directly.
 - A new account appears only after its profile publicly lists a location in Jordan and Kaggle search indexes it. There is no account-creation webhook in this integration.
 - This free workflow is stateless. It republishes the current snapshot and does not accumulate long-term ranking history or operate a public nomination queue. **Get listed** explains automatic inclusion instead.
+
+For a missing account, run `python -m backend.kaggle_source --check-username NAME` with operator dependencies and Kaggle authentication. If country discovery missed a public Jordan profile, add its username to `data/discovery-usernames.json` and publish the source change; scheduled jobs will recheck it. An empty location in the search API cannot be corrected by browser refresh or a username override. Check the owner's location sharing and indexing instead. The local source changes must be pushed before GitHub's workflow can use them.
 
 GitHub schedules can be delayed or dropped during high load. Public repository schedules are automatically disabled after **60 days without repository activity**. Check the Actions page periodically and re-enable the workflow if needed. There is no guarantee of instant updates or unattended operation forever on this free setup. These are [documented schedule limits](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 

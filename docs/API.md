@@ -20,7 +20,7 @@ Leaderboard query parameters:
 | Parameter | Values/default |
 | --- | --- |
 | `category` | `competitions` (default), `datasets`, `notebooks`, `discussions` |
-| `q` | Case-insensitive name/username search, limited to 80 characters |
+| `q` | Name/username/organization search, `@username`, or Kaggle profile URL; limited to 80 characters. Case/diacritic insensitive; all words must match, in any order. |
 | `city` | Empty or a city returned by the community facets; also accepts the nomination city list. |
 | `tier` | Empty or `Expert`, `Master`, `Grandmaster` |
 | `page` | Integer >= 1, default 1 |
@@ -37,6 +37,8 @@ For search snapshots, `available_categories` is the comma-separated list `compet
 ## Community directory
 
 `GET /members` accepts `q` (name, username, or organization), `city`, `tier` (highest tier: Novice, Contributor, Expert, Master, Grandmaster, Unspecified), `status` (empty, ranked, unranked), `sort` (name, newest, tier), `page` (>=1), and `page_size` (1–100; default 24). All filters are optional.
+
+Both directory and leaderboard searches also accept a Kaggle profile URL or `@username`. Each word must match a field, in any order. Unicode normalization ignores accents and Arabic vowel marks. `%` and `_` are literal characters. The static site uses the same matching rules. Search and browser refresh read the latest imported snapshot; neither triggers a public Kaggle download. Operators can diagnose upstream omissions with `python -m backend.kaggle_source --check-username NAME`.
 
 Results include `has_ranking`, `ranked_categories`, `overall_tier`, `organization`, raw shared `location`, `city`, `progression_opt_out`, and `checked_at`, alongside member identity fields. Unknown cities use `Not specified`. Community facets report total members, members with any available rank, members without an available rank, city counts, and highest-tier counts. Facets describe the full snapshot and remain stable while filtering.
 

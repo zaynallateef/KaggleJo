@@ -16,6 +16,8 @@ def connect(path=None):
     target.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(target, timeout=15)
     db.row_factory = sqlite3.Row
+    from backend.search import normalize_text
+    db.create_function("search_text", 1, lambda value: normalize_text(value or ""), deterministic=True)
     db.execute("PRAGMA foreign_keys = ON")
     try:
         with db:

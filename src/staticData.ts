@@ -1,4 +1,5 @@
 import type { Achievement, Category, DirectoryPerson, DirectoryResponse, Member, Meta, Overview, Profile } from './types'
+import { matchesPerson, searchTerms } from './search'
 
 export interface PublicSnapshot {
   schema_version: number; generated_at: string; meta: Meta
@@ -22,8 +23,8 @@ function category(params: URLSearchParams): Category {
   return value as Category
 }
 function rankingRows(snapshot: PublicSnapshot, params: URLSearchParams) {
-  const query = (params.get('q') || '').trim().toLowerCase(), city = params.get('city'), tier = params.get('tier')
-  return snapshot.rankings[category(params)].filter(row => (!query || `${row.display_name} ${row.username}`.toLowerCase().includes(query)) && (!city || row.city === city) && (!tier || row.tier === tier))
+  const terms = searchTerms(params.get('q') || ''), city = params.get('city'), tier = params.get('tier')
+  return snapshot.rankings[category(params)].filter(row => matchesPerson(row, terms) && (!city || row.city === city) && (!tier || row.tier === tier))
 }
 
 export function staticResponse(snapshot: PublicSnapshot, path: string): unknown {
@@ -32,10 +33,10 @@ export function staticResponse(snapshot: PublicSnapshot, path: string): unknown 
   if (url.pathname === '/overview') return snapshot.overviews[category(params)]
   if (url.pathname === '/leaderboard') return { ...paginate(rankingRows(snapshot, params), params, 10), category: category(params), meta: snapshot.meta }
   if (url.pathname === '/members') {
-    const query = (params.get('q') || '').trim().toLowerCase(), city = params.get('city'), tier = params.get('tier'), status = params.get('status'), sort = params.get('sort') || 'name'
+    const terms = searchTerms(params.get('q') || ''), city = params.get('city'), tier = params.get('tier'), status = params.get('status'), sort = params.get('sort') || 'name'
     if (!['', 'ranked', 'unranked'].includes(status || '') || !['name', 'newest', 'tier'].includes(sort)) throw new Error('Choose valid directory filters.')
     const tierOrder: Record<string, number> = { Grandmaster: 4, Master: 3, Expert: 2, Contributor: 1, Novice: 0, Unspecified: -1 }
-    const items = snapshot.members.filter(row => (!query || `${row.display_name} ${row.username} ${row.organization || ''}`.toLowerCase().includes(query)) && (!city || row.city === city) && (!tier || row.overall_tier === tier) && (!status || Boolean(row.has_ranking) === (status === 'ranked'))).sort((a, b) => {
+    const items = snapshot.members.filter(row => matchesPerson(row, terms) && (!city || row.city === city) && (!tier || row.overall_tier === tier) && (!status || Boolean(row.has_ranking) === (status === 'ranked'))).sort((a, b) => {
       if (sort === 'newest' && a.joined !== b.joined) return b.joined.localeCompare(a.joined)
       if (sort === 'tier') { const difference = (tierOrder[b.overall_tier || 'Unspecified'] ?? -1) - (tierOrder[a.overall_tier || 'Unspecified'] ?? -1); if (difference) return difference }
       return a.display_name.localeCompare(b.display_name, 'en') || a.username.localeCompare(b.username, 'en')

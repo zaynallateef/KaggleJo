@@ -6,15 +6,20 @@ export const IS_STATIC = import.meta.env.VITE_DATA_MODE === 'static'
 export const PROFILE_ACTION = IS_STATIC ? 'Get listed' : 'Add a profile'
 let snapshotPromise: Promise<PublicSnapshot> | undefined
 let loadedAt = 0
+export function invalidateSnapshot() {
+  snapshotPromise = undefined
+  loadedAt = 0
+}
 export async function loadStaticSnapshot(): Promise<PublicSnapshot> {
   if (!snapshotPromise || Date.now() - loadedAt > 60000) {
     loadedAt = Date.now()
-    snapshotPromise = fetch(`${import.meta.env.BASE_URL}data/snapshot.json`, { cache: 'no-cache' }).then(async response => {
+    const pending = fetch(`${import.meta.env.BASE_URL}data/snapshot.json`, { cache: 'no-cache' }).then(async response => {
       if (!response.ok) throw new Error('The public dataset is unavailable. Please try again shortly.')
       const body = await response.json() as PublicSnapshot
       if (body.schema_version !== 1 || body.meta?.mode !== 'live' || !Array.isArray(body.members) || !body.rankings || !body.profiles || !body.overviews) throw new Error('The published dataset is invalid.')
       return body
-    }).catch(error => { snapshotPromise = undefined; throw error })
+    }).catch(error => { if (snapshotPromise === pending) snapshotPromise = undefined; throw error })
+    snapshotPromise = pending
   }
   return snapshotPromise
 }

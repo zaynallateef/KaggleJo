@@ -26,6 +26,26 @@ describe('static hosting transport', () => {
     await expect(api.request('/nominations', { method: 'POST', body: 'private form contents' })).rejects.toThrow('automatic')
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('revalidates immediately on refresh while sharing the next request', async () => {
+    await api.getDirectory(new URLSearchParams())
+    api.invalidateSnapshot()
+    const newer = { ...snapshot, community: { ...snapshot.community, total_members: 2 } }
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(newer), { status: 200 }))
+    const [directory] = await Promise.all([api.getDirectory(new URLSearchParams()), api.getProfile('public_member')])
+    expect(directory.community.total_members).toBe(2)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+  it('an old failed request cannot clear a newer refresh request', async () => {
+    let failOld!: (reason: Error) => void
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((_, reject) => { failOld = reject }))
+    const old = api.getDirectory(new URLSearchParams()).catch(() => undefined)
+    api.invalidateSnapshot()
+    await api.getDirectory(new URLSearchParams())
+    failOld(new Error('Old connection failed'))
+    await old
+    await api.getDirectory(new URLSearchParams())
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
   it('rejects demo publications and permits recovery after a failed load', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...snapshot, meta: { mode: 'demo' } }), { status: 200 }))
     await expect(api.getDirectory(new URLSearchParams())).rejects.toThrow('invalid')
