@@ -18,6 +18,8 @@ jobs:
   data:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      snapshot_name: public-snapshot-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,7 +52,7 @@ jobs:
         run: python -m backend.export_static --db data/publish.db --output public/data/snapshot.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: public-snapshot
+          name: public-snapshot-${{ github.run_attempt }}
           path: public/data/snapshot.json
           if-no-files-found: error
           retention-days: 1
@@ -59,6 +61,8 @@ jobs:
     needs: data
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      pages_name: github-pages-${{ github.run_attempt }}
     permissions:
       contents: read
       pages: read
@@ -72,7 +76,7 @@ jobs:
           cache: npm
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: public-snapshot
+          name: ${{ needs.data.outputs.snapshot_name }}
           path: public/data
       - run: npm ci
       - run: npm test
@@ -84,6 +88,7 @@ jobs:
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: dist
           retention-days: 1
 
@@ -100,3 +105,5 @@ jobs:
       - name: Publish the completed build
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: ${{ needs.build.outputs.pages_name }}
