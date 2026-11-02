@@ -30,6 +30,8 @@ jobs:
             backend/requirements.lock
             backend/requirements-data.txt
       - run: python -m pip install -r backend/requirements.lock -r backend/requirements-data.txt
+      - name: Verify Kaggle SDK imports
+        run: python -c "from kaggle.api.kaggle_api_extended import KaggleApi; from kagglesdk.search.types.search_api_service import ListEntitiesRequest, ListEntitiesFilters, ApiSearchUsersFilters; from kagglesdk.search.types.search_enums import DocumentType, PrivacyFilter; from kagglesdk.users.types.search_users import SearchUsersOrderBy"
       - run: python -m unittest discover -s backend/tests -v
       - name: Fetch fresh public Jordan profiles
         env:
