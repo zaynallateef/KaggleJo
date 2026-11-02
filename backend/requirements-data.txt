@@ -1,3 +1,6 @@
 # Optional operator-only dependencies. The web server never needs Kaggle credentials.
 kaggle==2.2.5
 kagglesdk==0.1.38
+# Kaggle's upload models import six, but Kaggle 2.2.5 omits it from its metadata.
+# Newer dateutil versions no longer install it transitively on clean runners.
+six==1.17.0
