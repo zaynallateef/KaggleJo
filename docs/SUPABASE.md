@@ -17,7 +17,9 @@ Supabase holds the last successful public Kaggle snapshot, private profile submi
 
 Connect the Supabase integration in ChatGPT to enable project inspection and migration deployment without sharing credentials in chat. Choose a project dedicated to KaggleJo. No Supabase project has been created or migrated merely by adding these source files.
 
-Apply [the migration](../supabase/migrations/202611020001_community.sql) once through Supabase migrations or the project's SQL editor. Inspect the project target first; do not run resets on an existing database. The migration only adds KaggleJo-prefixed tables and functions.
+Apply [the migration](../supabase/migrations/20261102122627_community.sql) once through Supabase migrations or the project's SQL editor. Inspect the project target first; do not run resets on an existing database. The migration only adds KaggleJo-prefixed tables and functions.
+
+For this repository, the migration is already applied to the dedicated **KaggleJo** project (`hffcvpqoarbniqfycknu`, Frankfurt). Its filename matches the deployed migration history version `20261102122627`; do not apply it again to that project. The project was initialized with the existing 1,247-profile public snapshot on 2 November 2026. Website publication and automated refresh require the repository configuration below.
 
 The tables enable Row Level Security and revoke direct access for `anon` and `authenticated`. Only the public directory and validated nomination functions are executable by visitors. Publication and direct table writes require the server's secret key or an operator's database access. The directory function exposes no pending submissions, private review notes, or submission counters.
 

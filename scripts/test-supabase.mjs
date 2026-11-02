@@ -12,7 +12,7 @@ const denied = async (sql, params = []) => {
 }
 try {
   await db.exec('create role anon; create role authenticated; create role service_role bypassrls;')
-  await db.exec(await readFile(new URL('../supabase/migrations/202611020001_community.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/20261102122627_community.sql', import.meta.url), 'utf8'))
   await db.exec('set role anon')
   const read = async () => (await db.query('select public.kagglejo_directory() as data')).rows[0].data
   check((await read()).snapshot === null, 'An unpublished database must not invent a snapshot.')
