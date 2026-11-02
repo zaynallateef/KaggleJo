@@ -15,6 +15,3 @@ A community directory and leaderboard for Kagglers who publicly share a location
 - Add a profile without manual acceptance; available statistics update during the next hourly sync.
 
 ## You can check the website in the Github Pages above
-
-
-Automatic submission details and operator controls: [integration guide](docs/AUTOMATIC_SUBMISSIONS.md).
